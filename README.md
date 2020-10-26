@@ -12,7 +12,7 @@ To install simply run
 # Tools
 python3 tax_tools.py -x tax_lots -n animal-name-spaces
 
-where animal-name-spaces is the name of your hotspot.
+where animal-name-spaces is the name of your hotspot. Update: can also be a comma separated list of multiple hotspots by animal names
 
 This will refresh all hotspots, retrieve all of your rewards and save them in data/animal-name-spaces.csv, then output your consolidated tax lots by day in output/animal-name-spaces_tax_lots.csv
 

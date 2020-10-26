@@ -17,59 +17,63 @@ from datetime import datetime
 from math import radians, cos, sin, asin, sqrt, log10, ceil, degrees, atan2
 
 def load_hnt_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000):
-    tax_lots = load_api_rewards(hotspot,use_realtime_oracle_price,num_tax_lots)
-    print("Got: {len(tax_lots)} lots")
-    f = open(f"data/{hotspot['name']}.csv", "w")
-    for tax_lot in reversed(tax_lots):
-        as_of_time = tax_lot['timestamp']
-        amount = tax_lot['amount']
-        block = tax_lot['block']
-        oracle_price = 0
-        #oracle_price = load_oracle_price_at_block(block)['price']
-        print(f"{as_of_time},{amount},{oracle_price},{block}")
-        f.write(f"{as_of_time},{amount},{oracle_price},{block}\n")
-    f.close()
+   for hotspot in hotspots:
+      rewards = load_api_rewards(hotspot,use_realtime_oracle_price,num_tax_lots)
+      print("Got: {len(rewards)} rewards")
+      f = open(f"data/{hotspot['name']}.csv", "w")
+      for reward in reversed(rewards):
+         as_of_time = reward['timestamp']
+         amount = reward['amount']
+         block = reward['block']
+         oracle_price = 0
+         #oracle_price = load_oracle_price_at_block(block)['price']
+         print(f"{as_of_time},{amount},{oracle_price},{block}")
+         f.write(f"{as_of_time},{amount},{oracle_price},{block}\n")
+      f.close()
 
-def load_api_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000):
-    cursor = None
-    tax_lots = []
-    address = hotspot['address']
-    first_block = hotspot['block_added']
-    max_date = datetime.now() + timedelta(days=1) #mostly for UTC nonsense
-    max_time = max_date.date().isoformat()
-    min_date = get_block_date_time(first_block).date()
-    min_date = min_date - timedelta(days=1) #mostly for UTC nonsense
-    min_time = min_date.isoformat()
-    print(max_time)
-    print(min_time)
-    if num_tax_lots > 50000:
-        raise ValueError(f"invalid number of rewards to load")
-    while len(tax_lots) < num_tax_lots:
-        path = f"hotspots/{address}/rewards?max_time={max_time}&min_time={min_time}"
-        print(path)
-        if cursor:
-            path += f"&cursor={cursor}"
-        result = api_call(path=path)
-        print(f"-I- loaded {len(result['data'])} rewards")
-        cursor = result.get('cursor')
+def load_api_rewards(hotspot, use_realtime_oracle_price=True, num_rewards=10000):
+   cursor = None
+   rewards = []
+   address = hotspot['address']
+   first_block = hotspot['block_added']
+   max_date = datetime.now() + timedelta(days=1) #mostly for UTC nonsense
+   max_time = max_date.date().isoformat()
+   min_date = get_block_date_time(first_block).date()
+   min_date = min_date - timedelta(days=1) #mostly for UTC nonsense
+   min_time = min_date.isoformat()
+   #print(max_time)
+   #print(min_time)
+   if num_rewards > 50000:
+       raise ValueError(f"invalid number of rewards to load")
+   while len(rewards) < num_rewards:
+      path = f"hotspots/{address}/rewards?max_time={max_time}&min_time={min_time}"
+      #print(path)
+      if cursor:
+         path += f"&cursor={cursor}"
+      result = api_call(path=path)
+      #print(f"-I- loaded {len(result['data'])} rewards")
+      cursor = result.get('cursor')
 
-        tax_lots.extend(result['data'])
-        if not cursor:
-            break
-        #print(tax_lots)
+      rewards.extend(result['data'])
+      if not cursor:
+         break
+      #print(tax_lots)
 
-    return tax_lots
+   return rewards
 
-def load_tax_lots(hotspot):
-    filename = f"data/{hotspot['name']}.csv"
-    file_exists = path.exists(filename)
-    if file_exists != True:
-        load_hnt_rewards(hotspot)
-    prices_by_date = get_hnt_open_prices()
-    print(prices_by_date)
-    day_lots = consolidate_day_lots(filename)
-    return output_tax_lots_by_day(hotspot, day_lots, prices_by_date)
+def load_tax_lots(hotspots):
+   tax_lots = []
+   prices_by_date = get_hnt_open_prices()
+   for hotspot in hotspots:
+      filename = f"data/{hotspot['name']}.csv"
+      file_exists = path.exists(filename)
+      if file_exists != True:
+         load_hnt_rewards(hotspot)
 
+      hotspot_day_lots = consolidate_day_lots(filename)
+      hotspot_tax_lots = output_tax_lots_by_day(hotspot, hotspot_day_lots, prices_by_date)
+      tax_lots.extend(hotspot_tax_lots)
+   return tax_lots
 
 def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
     tax_lots = []
@@ -94,6 +98,7 @@ def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
         f.write(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}\n')
         tax_lot = {}
         tax_lot['time'] = date
+        tax_lot['hotspot'] = hotspot_name
         tax_lot['hnt_amount'] = hnt_amount_adj
         tax_lot['hnt_price'] = hnt_price
         tax_lots.append(tax_lot)
@@ -117,9 +122,7 @@ def get_hnt_open_prices(filename ='data/hnt-prices.csv'):
             price_str = row[1]
             price = float(price_str)
             prices_by_date[date_stamp] = price
-
     return prices_by_date
-
 
 #takes all transactions and consolidates them into a single tax lot per day
 def consolidate_day_lots(filename):
@@ -133,12 +136,12 @@ def consolidate_day_lots(filename):
             time_stamp_str = row[0]
             time_stamp = parse(time_stamp_str)
             time_stamp_adj = utc_to_local(time_stamp)
-            print(time_stamp)
-            print(time_stamp_adj)
+            #print(time_stamp)
+            #print(time_stamp_adj)
             date_stamp = time_stamp_adj.date() #handle timezone?
             amount = int(row[1])
             block = row[2]
-            print(f'{time_stamp}, {date_stamp}: {amount}')
+            #print(f'{time_stamp}, {date_stamp}: {amount}')
 
             if date_stamp in amounts_by_date.keys():
                 amounts_by_date[date_stamp] += amount
@@ -146,9 +149,8 @@ def consolidate_day_lots(filename):
                 amounts_by_date[date_stamp] = amount
             total += amount
 
-    print(f'Processed {line_count} lines.')
-    print(amounts_by_date)
-    print(f'Total: {total}')
+    #print(amounts_by_date)
+    #print(f'Total: {total}')
     return amounts_by_date
 
 def parse_trades(filename):
@@ -176,21 +178,21 @@ def parse_trades(filename):
 #    print(trades)
     return trades
 
-def process_trades(hotspot, filename):
+def process_trades(hotspots, filename):
    trades = parse_trades(filename)
-   tax_lots = load_tax_lots(hotspot)
+   tax_lots = load_tax_lots(hotspots)
    schedule_d_items = get_schedule_d(tax_lots, trades)
    output_schedule_d(schedule_d_items)
-
 
 def get_schedule_d(tax_lots, trades):
    schedule_d_items = []
    total_gain_loss = 0
+   sorted_tax_lots = sorted(tax_lots, key=lambda x: (x['time'], x['hotspot']))
    for trade in reversed(trades): #order by time
       trade_time = trade['time']
       trade_hnt_price = trade['hnt_price']
       remaining_amount = trade['hnt_amount']
-      for tax_lot in tax_lots: #order by time (FIFO only now)
+      for tax_lot in sorted_tax_lots: #order by time (FIFO only now)
          tax_lot_amount = tax_lot['hnt_amount']
          if tax_lot_amount  == 0:
             continue
@@ -261,19 +263,22 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--file', help='data file for tax processing')
     args = parser.parse_args()
     H = Hotspots()
-    hotspot = None
+    hotspots = []
     if args.name:
-        hotspot = H.get_hotspot_by_name(args.name)
-        if hotspot is None:
-            raise ValueError(f"could not find hotspot named '{args.name}' use dashes between words")
+        names = args.name.split(',')
+        for name in names:
+           hotspot = H.get_hotspot_by_name(name)
+           if hotspot is None:
+              raise ValueError(f"could not find hotspot named '{name}' use dashes between words")
+           hotspots.append(hotspot)
 
     if args.x == 'refresh_hotspots':
         load_hotspots(True)
     if args.x == 'hnt_rewards':
-        load_hnt_rewards(hotspot)
+        load_hnt_rewards(hotspots)
     if args.x =='tax_lots':
-        load_tax_lots(hotspot)
+        load_tax_lots(hotspots)
     if args.x == 'parse_trades':
         parse_trades(args.file)
     if args.x =='schedule_d':
-        process_trades(hotspot, args.file)
+        process_trades(hotspots, args.file)
