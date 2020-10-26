@@ -68,10 +68,11 @@ def load_tax_lots(hotspot):
     prices_by_date = get_hnt_open_prices()
     print(prices_by_date)
     day_lots = consolidate_day_lots(filename)
-    output_tax_lots_by_day(hotspot, day_lots, prices_by_date)
+    return output_tax_lots_by_day(hotspot, day_lots, prices_by_date)
 
 
 def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
+    tax_lots = []
     hnt_adjust = 100000000 #divisor for hnt value rep
     total_hnt = 0
     total_usd = 0
@@ -91,8 +92,14 @@ def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
         total_usd += usd_amount
         print(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}')
         f.write(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}\n')
+        tax_lot = {}
+        tax_lot['time'] = date
+        tax_lot['hnt_amount'] = hnt_amount_adj
+        tax_lot['hnt_price'] = hnt_price
+        tax_lots.append(tax_lot)
 
     print(f'Total HNT: {total_hnt}, Total USD: {total_usd}')
+    return tax_lots
 
 def get_hnt_open_prices(filename ='data/hnt-prices.csv'):
     print(f'reading prices from {filename}')
@@ -144,6 +151,93 @@ def consolidate_day_lots(filename):
     print(f'Total: {total}')
     return amounts_by_date
 
+def parse_trades(filename):
+    #binance for now
+    print(f'reading trades from {filename}')
+    trades = []
+    with open (filename) as csv_file:
+        csv_reader = csv.reader(csv_file, delimiter=',')
+        line_count = 0;
+        for row in csv_reader:
+            line_count += 1
+            if (line_count == 1):
+                continue
+            time_stamp_str = row[0]
+            time_stamp = parse(time_stamp_str)
+            time_stamp_adj = utc_to_local(time_stamp)
+            hnt_price = float(row[3])
+            hnt_amount = float(row[4])
+            trade = {}
+            trade['time'] = time_stamp_adj
+            trade['hnt_price'] = hnt_price
+            trade['hnt_amount'] = hnt_amount
+            trade['exchange'] = 'binance' #support others later
+            trades.append(trade)
+#    print(trades)
+    return trades
+
+def process_trades(hotspot, filename):
+   trades = parse_trades(filename)
+   tax_lots = load_tax_lots(hotspot)
+   schedule_d_items = get_schedule_d(tax_lots, trades)
+   output_schedule_d(schedule_d_items)
+
+
+def get_schedule_d(tax_lots, trades):
+   schedule_d_items = []
+   total_gain_loss = 0
+   for trade in reversed(trades): #order by time
+      trade_time = trade['time']
+      trade_hnt_price = trade['hnt_price']
+      remaining_amount = trade['hnt_amount']
+      for tax_lot in tax_lots: #order by time (FIFO only now)
+         tax_lot_amount = tax_lot['hnt_amount']
+         if tax_lot_amount  == 0:
+            continue
+         tax_lot_hnt_price = tax_lot['hnt_price']
+         schedule_d_amount = 0
+         schedule_d_time = trade_time
+         schedule_d_gain_loss = 0
+         if tax_lot_amount > remaining_amount:
+            schedule_d_amount = remaining_amount
+            tax_lot_amount -= remaining_amount
+            remaining_amount = 0
+         else:
+            schedule_d_amount = tax_lot_amount
+            remaining_amount -= tax_lot_amount
+            tax_lot_amount = 0
+         if schedule_d_amount == 0:
+            continue
+         tax_lot['hnt_amount'] = tax_lot_amount
+         schedule_d_gain_loss = schedule_d_amount * (trade_hnt_price - tax_lot_hnt_price)
+         schedule_d_item = {}
+         schedule_d_item['open_time'] = tax_lot['time']
+         schedule_d_item['close_time'] = schedule_d_time
+         schedule_d_item['open_price'] = tax_lot_hnt_price
+         schedule_d_item['close_price'] = trade_hnt_price
+         schedule_d_item['gain_loss'] = schedule_d_gain_loss
+         schedule_d_items.append(schedule_d_item)
+         total_gain_loss += schedule_d_gain_loss
+         print(schedule_d_item)
+   print(total_gain_loss)
+   #print(schedule_d_items)
+   return schedule_d_items
+
+def output_schedule_d(items):
+    f = open(f"output/schedule_d.csv", "w")
+    msg = f'open_time,close_time,open_price,close_price,gain_loss'
+    print(f'{msg}')
+    f.write(f'{msg}\n')
+    for item in items:
+       open_time = item['open_time']
+       close_time = item['close_time']
+       open_price = item['open_price']
+       close_price = item['close_price']
+       gain_loss = item['gain_loss']
+       msg = f'{open_time},{close_time},{open_price},{close_price},{gain_loss}'
+       print(f'{msg}')
+       f.write(f'{msg}\n')
+
 def get_block_date_time(block):
     path = f"blocks/{block}"
     result = api_call(path=path)
@@ -162,7 +256,7 @@ def utc_to_local(utc_dt):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("tax tools")
-    parser.add_argument('-x', choices=['refresh_hotspots','oracle_prices','hnt_rewards', 'tax_lots'], help="action to take", required=True)
+    parser.add_argument('-x', choices=['refresh_hotspots','hnt_rewards', 'tax_lots', 'parse_trades', 'schedule_d'], help="action to take", required=True)
     parser.add_argument('-n', '--name', help='hotspot name to analyze with dashes-between-words')
     parser.add_argument('-f', '--file', help='data file for tax processing')
     args = parser.parse_args()
@@ -175,9 +269,11 @@ if __name__ == '__main__':
 
     if args.x == 'refresh_hotspots':
         load_hotspots(True)
-    if args.x == 'oracle_prices':
-        load_blocks(True)
     if args.x == 'hnt_rewards':
         load_hnt_rewards(hotspot)
     if args.x =='tax_lots':
         load_tax_lots(hotspot)
+    if args.x == 'parse_trades':
+        parse_trades(args.file)
+    if args.x =='schedule_d':
+        process_trades(hotspot, args.file)
