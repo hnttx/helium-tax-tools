@@ -3,13 +3,15 @@ import urllib.request
 import urllib.error
 import time
 import argparse
+import calendar
 import datetime
 import csv
 import os.path
 from os import path
 from utils import load_hotspots, api_call
 from dateutil.parser import parse
-from datetime import timedelta  
+from dateutil import tz
+from datetime import timedelta
 from classes.Hotspots import Hotspots
 from datetime import datetime
 from math import radians, cos, sin, asin, sqrt, log10, ceil, degrees, atan2
@@ -58,14 +60,14 @@ def load_api_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000
 
     return tax_lots
 
-def load_tax_lots(hotspot, time_zone_adjust=-4):
+def load_tax_lots(hotspot):
     filename = f"data/{hotspot['name']}.csv"
     file_exists = path.exists(filename)
     if file_exists != True:
-        load_hnt_rewards(hotspot)    
+        load_hnt_rewards(hotspot)
     prices_by_date = get_hnt_open_prices()
     print(prices_by_date)
-    day_lots = consolidate_day_lots(filename, time_zone_adjust)
+    day_lots = consolidate_day_lots(filename)
     output_tax_lots_by_day(hotspot, day_lots, prices_by_date)
 
 
@@ -103,7 +105,7 @@ def get_hnt_open_prices(filename ='data/hnt-prices.csv'):
             if (line_count == 1):
                 continue
             time_stamp_str = row[0]
-            time_stamp = parse(time_stamp_str) 
+            time_stamp = parse(time_stamp_str)
             date_stamp = time_stamp.date()
             price_str = row[1]
             price = float(price_str)
@@ -113,7 +115,7 @@ def get_hnt_open_prices(filename ='data/hnt-prices.csv'):
 
 
 #takes all transactions and consolidates them into a single tax lot per day
-def consolidate_day_lots(filename, time_zone_adjust):
+def consolidate_day_lots(filename):
     print(f'reading from {filename}')
     amounts_by_date = {}
     total = 0
@@ -123,8 +125,7 @@ def consolidate_day_lots(filename, time_zone_adjust):
         for row in csv_reader:
             time_stamp_str = row[0]
             time_stamp = parse(time_stamp_str)
-            tz_delta = timedelta(hours = time_zone_adjust)
-            time_stamp_adj = time_stamp + tz_delta
+            time_stamp_adj = utc_to_local(time_stamp)
             print(time_stamp)
             print(time_stamp_adj)
             date_stamp = time_stamp_adj.date() #handle timezone?
@@ -151,6 +152,13 @@ def get_block_date_time(block):
     as_of_time = datetime.fromtimestamp(time)
     print(as_of_time)
     return as_of_time
+
+def utc_to_local(utc_dt):
+    # get integer timestamp to avoid precision lost
+    timestamp = calendar.timegm(utc_dt.timetuple())
+    local_dt = datetime.fromtimestamp(timestamp)
+    assert utc_dt.resolution >= timedelta(microseconds=1)
+    return local_dt.replace(microsecond=utc_dt.microsecond)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("tax tools")
