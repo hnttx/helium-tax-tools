@@ -81,9 +81,7 @@ def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
     total_hnt = 0
     total_usd = 0
     hotspot_name = hotspot['name']
-    f = open(f"output/{hotspot_name}_tax_lots.csv", "w")
-    print(f'date,hotspot,hnt_amount,hnt_price,usd_amount')
-    f.write(f'date,hotspot,hnt_amount,hnt_price,usd_amount\n')
+    filename = f"output/{hotspot_name}_tax_lots.csv"
     for key in day_lots:
         date = key
         hnt_amount = day_lots[key]
@@ -94,17 +92,32 @@ def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
         usd_amount = (hnt_amount * hnt_price) / hnt_adjust
         total_hnt += hnt_amount_adj
         total_usd += usd_amount
-        print(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}')
-        f.write(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}\n')
         tax_lot = {}
         tax_lot['time'] = date
         tax_lot['hotspot'] = hotspot_name
         tax_lot['hnt_amount'] = hnt_amount_adj
         tax_lot['hnt_price'] = hnt_price
+        tax_lot['usd_amount'] = usd_amount
         tax_lots.append(tax_lot)
+    output_tax_lots(tax_lots, filename)
 
     print(f'Total HNT: {total_hnt}, Total USD: {total_usd}')
     return tax_lots
+
+def output_tax_lots(tax_lots, filename):
+   f = open(f"{filename}", "w")
+   msg = f'date,hotspot,hnt_amount,hnt_price,usd_amount'
+   print(f'{msg}')
+   f.write(f'{msg}\n')
+   for tax_lot in tax_lots:
+      date = tax_lot['time']
+      hotspot_name = tax_lot['hotspot']
+      hnt_amount_adj = tax_lot['hnt_amount']
+      hnt_price = tax_lot['hnt_price']
+      usd_amount = tax_lot['usd_amount']
+      msg = f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}'
+      print(f'{msg}')
+      f.write(f'{msg}\n')
 
 def get_hnt_open_prices(filename ='data/hnt-prices.csv'):
     print(f'reading prices from {filename}')
@@ -181,13 +194,18 @@ def parse_trades(filename):
 def process_trades(hotspots, filename):
    trades = parse_trades(filename)
    tax_lots = load_tax_lots(hotspots)
-   schedule_d_items = get_schedule_d(tax_lots, trades)
+   result =  get_schedule_d(tax_lots, trades)
+   schedule_d_items = result[0]
+   remaining_tax_lots = result[1]
    output_schedule_d(schedule_d_items)
+   filename = 'output/remaining_tax_lots.csv'
+   output_tax_lots(remaining_tax_lots, filename)
 
 def get_schedule_d(tax_lots, trades):
    schedule_d_items = []
    total_gain_loss = 0
    sorted_tax_lots = sorted(tax_lots, key=lambda x: (x['time'], x['hotspot']))
+   remaining_tax_lots = []
    for trade in reversed(trades): #order by time
       trade_time = trade['time']
       trade_hnt_price = trade['hnt_price']
@@ -221,9 +239,13 @@ def get_schedule_d(tax_lots, trades):
          schedule_d_items.append(schedule_d_item)
          total_gain_loss += schedule_d_gain_loss
          print(schedule_d_item)
+   for tax_lot in sorted_tax_lots:
+      if tax_lot['hnt_amount'] != 0:
+         remaining_tax_lots.append(tax_lot)
+         print(tax_lot)
    print(total_gain_loss)
    #print(schedule_d_items)
-   return schedule_d_items
+   return schedule_d_items, remaining_tax_lots
 
 def output_schedule_d(items):
     f = open(f"output/schedule_d.csv", "w")
