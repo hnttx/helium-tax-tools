@@ -29,7 +29,7 @@ def load_hnt_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000
     f.close()
 
 def load_api_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000):
-    cursor = None	
+    cursor = None
     tax_lots = []
     address = hotspot['address']
     first_block = hotspot['block_added']
@@ -43,7 +43,7 @@ def load_api_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000
     if num_tax_lots > 50000:
         raise ValueError(f"invalid number of rewards to load")
     while len(tax_lots) < num_tax_lots:
-        path = f"hotspots/{address}/rewards?max_time={max_time}&min_time={min_time}"        
+        path = f"hotspots/{address}/rewards?max_time={max_time}&min_time={min_time}"
         print(path)
         if cursor:
             path += f"&cursor={cursor}"
@@ -56,42 +56,42 @@ def load_api_rewards(hotspot, use_realtime_oracle_price=True, num_tax_lots=10000
             break
         #print(tax_lots)
 
-    return tax_lots    
-    
+    return tax_lots
+
 def load_tax_lots(hotspot, time_zone_adjust=-4):
     filename = f"data/{hotspot['name']}.csv"
     file_exists = path.exists(filename)
     if file_exists != True:
         load_hnt_rewards(hotspot)    
-    prices_by_date = get_day_close_prices()
+    prices_by_date = get_hnt_open_prices()
     print(prices_by_date)
     day_lots = consolidate_day_lots(filename, time_zone_adjust)
     output_tax_lots_by_day(day_lots, prices_by_date)
-   
+
 
 def output_tax_lots_by_day(day_lots, prices_by_date):
     hnt_adjust = 100000000 #divisor for hnt value rep
     total_hnt = 0
     total_usd = 0
     f = open(f"output/{hotspot['name']}_tax_lots.csv", "w")
-    print(f'date,hnt_amount,close_price,usd_amount')
-    f.write(f'date,hnt_amount,close_price,usd_amount\n')
+    print(f'date,hnt_amount,hnt_price,usd_amount')
+    f.write(f'date,hnt_amount,hnt_price,usd_amount\n')
     for key in day_lots:
         date = key
         hnt_amount = day_lots[key]
         hnt_amount_adj = hnt_amount / hnt_adjust
-        close_price = 0
+        hnt_price = 0
         if date in prices_by_date:
-            close_price = prices_by_date[date]
-        usd_amount = (hnt_amount * close_price) / hnt_adjust
+            hnt_price = prices_by_date[date]
+        usd_amount = (hnt_amount * hnt_price) / hnt_adjust
         total_hnt += hnt_amount_adj
-        total_usd += usd_amount        
-        print(f'{date},{hnt_amount_adj},{close_price},{usd_amount}')
-        f.write(f'{date},{hnt_amount_adj},{close_price},{usd_amount}\n')
+        total_usd += usd_amount
+        print(f'{date},{hnt_amount_adj},{hnt_price},{usd_amount}')
+        f.write(f'{date},{hnt_amount_adj},{hnt_price},{usd_amount}\n')
 
     print(f'Total HNT: {total_hnt}, Total USD: {total_usd}')
 
-def get_day_close_prices(filename ='data/hnt-prices.csv'):
+def get_hnt_open_prices(filename ='data/hnt-prices.csv'):
     print(f'reading prices from {filename}')
     prices_by_date = {}
     with open (filename) as csv_file:
@@ -121,7 +121,6 @@ def consolidate_day_lots(filename, time_zone_adjust):
         line_count = 0
         for row in csv_reader:
             time_stamp_str = row[0]
-            #time_stamp = datetime.strptime(time_stamp_sr)
             time_stamp = parse(time_stamp_str)
             tz_delta = timedelta(hours = time_zone_adjust)
             time_stamp_adj = time_stamp + tz_delta
@@ -131,35 +130,29 @@ def consolidate_day_lots(filename, time_zone_adjust):
             amount = int(row[1])
             block = row[2]
             print(f'{time_stamp}, {date_stamp}: {amount}')
-            
+
             if date_stamp in amounts_by_date.keys():
                 amounts_by_date[date_stamp] += amount
             else:
                 amounts_by_date[date_stamp] = amount
             total += amount
-         
-            #if line_count == 0:
-            #    print(f'Column names are {", ".join(row)}')
-            #    line_count += 1
-            #else:
-            #    print(f'\t{row[0]} works in the {row[1]} department, and was born in {row[2]}.')
-            #    line_count += 1
+
     print(f'Processed {line_count} lines.')
     print(amounts_by_date)
     print(f'Total: {total}')
     return amounts_by_date
-    
+
 def get_block_date_time(block):
     path = f"blocks/{block}"
-    result = api_call(path=path)    
+    result = api_call(path=path)
     print(result)
     time = result["data"]["time"]
-    as_of_time = datetime.fromtimestamp(time)      
+    as_of_time = datetime.fromtimestamp(time)
     print(as_of_time)
-    return as_of_time    
+    return as_of_time
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser("tax tools") 
+    parser = argparse.ArgumentParser("tax tools")
     parser.add_argument('-x', choices=['refresh_hotspots','oracle_prices','hnt_rewards', 'tax_lots'], help="action to take", required=True)
     parser.add_argument('-n', '--name', help='hotspot name to analyze with dashes-between-words')
     parser.add_argument('-f', '--file', help='data file for tax processing')
@@ -169,8 +162,8 @@ if __name__ == '__main__':
     if args.name:
         hotspot = H.get_hotspot_by_name(args.name)
         if hotspot is None:
-            raise ValueError(f"could not find hotspot named '{args.name}' use dashes between words")	
-   
+            raise ValueError(f"could not find hotspot named '{args.name}' use dashes between words")
+
     if args.x == 'refresh_hotspots':
         load_hotspots(True)
     if args.x == 'oracle_prices':
