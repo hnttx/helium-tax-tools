@@ -66,16 +66,17 @@ def load_tax_lots(hotspot, time_zone_adjust=-4):
     prices_by_date = get_hnt_open_prices()
     print(prices_by_date)
     day_lots = consolidate_day_lots(filename, time_zone_adjust)
-    output_tax_lots_by_day(day_lots, prices_by_date)
+    output_tax_lots_by_day(hotspot, day_lots, prices_by_date)
 
 
-def output_tax_lots_by_day(day_lots, prices_by_date):
+def output_tax_lots_by_day(hotspot, day_lots, prices_by_date):
     hnt_adjust = 100000000 #divisor for hnt value rep
     total_hnt = 0
     total_usd = 0
-    f = open(f"output/{hotspot['name']}_tax_lots.csv", "w")
-    print(f'date,hnt_amount,hnt_price,usd_amount')
-    f.write(f'date,hnt_amount,hnt_price,usd_amount\n')
+    hotspot_name = hotspot['name']
+    f = open(f"output/{hotspot_name}_tax_lots.csv", "w")
+    print(f'date,hotspot,hnt_amount,hnt_price,usd_amount')
+    f.write(f'date,hotspot,hnt_amount,hnt_price,usd_amount\n')
     for key in day_lots:
         date = key
         hnt_amount = day_lots[key]
@@ -86,8 +87,8 @@ def output_tax_lots_by_day(day_lots, prices_by_date):
         usd_amount = (hnt_amount * hnt_price) / hnt_adjust
         total_hnt += hnt_amount_adj
         total_usd += usd_amount
-        print(f'{date},{hnt_amount_adj},{hnt_price},{usd_amount}')
-        f.write(f'{date},{hnt_amount_adj},{hnt_price},{usd_amount}\n')
+        print(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}')
+        f.write(f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}\n')
 
     print(f'Total HNT: {total_hnt}, Total USD: {total_usd}')
 
