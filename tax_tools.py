@@ -249,7 +249,7 @@ def get_schedule_d(tax_lots, trades):
 
 def output_schedule_d(items):
     f = open(f"output/schedule_d.csv", "w")
-    msg = f'open_time,close_time,open_price,close_price,gain_loss'
+    msg = f'open_time,close_time,open_price,close_price,gain_loss,gain,loss,longshort'
     print(f'{msg}')
     f.write(f'{msg}\n')
     for item in items:
@@ -258,7 +258,17 @@ def output_schedule_d(items):
        open_price = item['open_price']
        close_price = item['close_price']
        gain_loss = item['gain_loss']
-       msg = f'{open_time},{close_time},{open_price},{close_price},{gain_loss}'
+       gain = 0
+       loss = 0
+       if gain_loss >= 0:
+           gain = gain_loss
+       else:
+           loss = gain_loss
+       longshort = 'short' #default short
+       diff_days = (close_time.date() - open_time).days
+       if diff_days >= 365:
+           longshort = 'long'
+       msg = f'{open_time},{close_time},{open_price},{close_price},{gain_loss},{gain},{loss},{longshort}'
        print(f'{msg}')
        f.write(f'{msg}\n')
 
