@@ -24,10 +24,15 @@ def load_hnt_rewards(hotspot, use_realtime_oracle_price=True, num_rewards=10000)
       rewards = load_api_hotspot_rewards(hotspot,use_realtime_oracle_price,num_rewards)
       print("Got: {len(rewards)} rewards")
       f = open(f"data/{hotspot['name']}.csv", "w")
+
+      unique_blocks = {} #hack to remove dupe rewards
       for reward in reversed(rewards):
          as_of_time = reward['timestamp']
          amount = reward['amount']
          block = reward['block']
+         if block in unique_blocks:
+             continue
+         unique_blocks[block] = True
          oracle_price = 0
          #oracle_price = load_oracle_price_at_block(block)['price']
          print(f"{as_of_time},{amount},{oracle_price},{block}")
