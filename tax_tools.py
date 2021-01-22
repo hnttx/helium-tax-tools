@@ -277,7 +277,8 @@ def get_schedule_d(tax_lots, trades):
    total_gain_loss = 0
    sorted_tax_lots = sorted(tax_lots, key=lambda x: (x['time'], x['hotspot']))
    remaining_tax_lots = []
-   for trade in reversed(trades): #order by time
+   sorted_trades = sorted(trades, key=lambda x: (x['time']))  #order by time (FIFO)
+   for trade in sorted_trades:
       trade_time = trade['time']
       trade_hnt_price = trade['hnt_price']
       remaining_amount = trade['hnt_amount']
@@ -304,6 +305,7 @@ def get_schedule_d(tax_lots, trades):
          schedule_d_item = {}
          schedule_d_item['open_time'] = tax_lot['time']
          schedule_d_item['close_time'] = schedule_d_time
+         schedule_d_item['quantity'] = schedule_d_amount
          schedule_d_item['open_price'] = tax_lot_hnt_price
          schedule_d_item['close_price'] = trade_hnt_price
          schedule_d_item['gain_loss'] = schedule_d_gain_loss
@@ -320,12 +322,13 @@ def get_schedule_d(tax_lots, trades):
 
 def output_schedule_d(items):
     f = open(f"output/schedule_d.csv", "w")
-    msg = f'open_time,close_time,open_price,close_price,gain_loss,gain,loss,longshort'
+    msg = f'open_time,close_time,quantity,open_price,close_price,gain_loss,gain,loss,longshort'
     print(f'{msg}')
     f.write(f'{msg}\n')
     for item in items:
        open_time = item['open_time']
        close_time = item['close_time']
+       quantity = item['quantity']
        open_price = item['open_price']
        close_price = item['close_price']
        gain_loss = item['gain_loss']
@@ -339,7 +342,7 @@ def output_schedule_d(items):
        diff_days = (close_time.date() - open_time).days
        if diff_days >= 365:
            longshort = 'long'
-       msg = f'{open_time},{close_time},{open_price},{close_price},{gain_loss},{gain},{loss},{longshort}'
+       msg = f'{open_time},{close_time},{quantity},{open_price},{close_price},{gain_loss},{gain},{loss},{longshort}'
        print(f'{msg}')
        f.write(f'{msg}\n')
 
