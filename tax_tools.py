@@ -168,12 +168,14 @@ def output_tax_lots_by_day(hotspot, day_lots, account_transactions, prices_by_da
         total_hnt += hnt_amount_adj
         total_usd += usd_amount
         tax_lot = {}
-        tax_lot['time'] = date
+        dt = datetime.combine(date, datetime.min.time())
+        tax_lot['time'] = dt
         tax_lot['hotspot'] = hotspot_name
         tax_lot['hnt_amount'] = hnt_amount_adj
         tax_lot['hnt_price'] = hnt_price
         tax_lot['usd_amount'] = usd_amount
         tax_lots.append(tax_lot)
+        print(f"{tax_lot}")
     output_tax_lots(tax_lots, filename)
 
     print(f'Total HNT: {total_hnt}, Total USD: {total_usd}')
@@ -254,10 +256,17 @@ def parse_trades(filename):
             if (line_count == 1):
                 continue
             time_stamp_str = row[0]
+            market = row[1]
+            if not market.startswith('HNT'):
+                raise Exception('unexpected product in trades file: {market}', '{market} not supported')
+            buy_sell = row[2]
             time_stamp = parse(time_stamp_str)
             time_stamp_adj = utc_to_local(time_stamp)
             hnt_price = float(row[3])
             hnt_amount = float(row[4])
+            if buy_sell.startswith('B'):
+                print(f'buy detected {hnt_amount}')
+                hnt_amount = 0 - hnt_amount #treat as buy
             trade = {}
             trade['time'] = time_stamp_adj
             trade['hnt_price'] = hnt_price
@@ -277,13 +286,38 @@ def process_trades(hotspots, filename, year):
    filename = 'output/remaining_tax_lots.csv'
    output_tax_lots(remaining_tax_lots, filename)
 
+def get_buy_trade_tax_lots(buy_trades):
+   sorted_buy_trades = sorted(buy_trades, key=lambda x: (x['time']))  #order by time (FIFO)
+   tax_lots = []
+   for trade in sorted_buy_trades: #create new tax lots for any buys
+        tax_lot = {}
+        time_stamp = trade['time']
+        print(f'{time_stamp}')
+        tax_lot['time'] = time_stamp
+        tax_lot['hotspot'] = 'hntbuy'
+        tax_lot['hnt_amount'] = 0 - trade['hnt_amount']
+        tax_lot['hnt_price'] = trade['hnt_price']
+        tax_lot['usd_amount'] = tax_lot['hnt_amount'] * tax_lot['hnt_price'] 
+        tax_lots.append(tax_lot)
+        print(f"{tax_lot}")
+   return tax_lots
+
+
 def get_schedule_d(tax_lots, trades):
    schedule_d_items = []
-   total_gain_loss = 0
-   sorted_tax_lots = sorted(tax_lots, key=lambda x: (x['time'], x['hotspot']))
+   total_gain_loss = 0 
    remaining_tax_lots = []
    sorted_trades = sorted(trades, key=lambda x: (x['time']))  #order by time (FIFO)
-   for trade in sorted_trades:
+   sorted_sell_trades = [x for x in sorted_trades if x['hnt_amount'] >= 0]
+   sorted_buy_trades = [x for x in sorted_trades if x['hnt_amount'] < 0]
+   buy_tax_lots = get_buy_trade_tax_lots(sorted_buy_trades)
+   tax_lots.extend(buy_tax_lots)
+
+   sorted_tax_lots = sorted(tax_lots, key=lambda x: (x['time'], x['hotspot']))
+
+   print(f'processing {len(sorted_sell_trades)} trades.')
+   for trade in sorted_sell_trades:
+      print(f'{trade}')
       trade_time = trade['time']
       trade_hnt_price = trade['hnt_price']
       remaining_amount = trade['hnt_amount']
@@ -344,9 +378,11 @@ def output_schedule_d(items):
        else:
            loss = gain_loss
        longshort = 'short' #default short
-       diff_days = (close_time.date() - open_time).days
+       diff_days = (close_time.date() - open_time.date()).days
        if diff_days >= 365:
            longshort = 'long'
+       if diff_days < 0:
+             raise Exception(f'tax lot processing resulted in scheduled d close {close_time} before open {open_time}, aborting', 'transaction order failure')
        msg = f'{open_time},{close_time},{quantity},{open_price},{close_price},{gain_loss},{gain},{loss},{longshort}'
        print(f'{msg}')
        f.write(f'{msg}\n')

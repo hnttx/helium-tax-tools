@@ -43,7 +43,7 @@ I defaulted 1/1/2020 - 4/17/2020 with 0.15 (adjust as you see fit), I'm not a ta
 
 If your hotspot predates that, you will need to make adjustments certainly. Especially if you carried basis from 2019.
 
-To Do: support other exchange formats, improve schedule D functionality
+To Do: support other exchange formats, improve schedule D functionality, support HNT buying activity properly
 
 # Disclaimer
 Use at your own risk. I am not an accountant and take no responsibility for these tools or your taxes.
