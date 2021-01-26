@@ -38,7 +38,7 @@ Date(UTC),Market,Type,Price,Amount,Total,Fee,Fee Coin
 
 # Expected HeliumEx DB Export CSV format
 user_id,email,timestamp,transaction_type,symbol,account_id,transaction_amount,exchange_transaction_id,comment,order_id,sequence_number,post_balance
-* iI does handle fees
+* It does handle fees (by aggregating the three line items per trade execution)
 
 
 # Known issues
