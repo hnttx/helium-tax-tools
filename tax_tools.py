@@ -3,41 +3,30 @@ import urllib.request
 import urllib.error
 import time
 import argparse
-import calendar
 import datetime
 import csv
 import os.path
 from os import path
 from utils import load_hotspots, api_call
 from dateutil.parser import parse
-from dateutil import tz
-from datetime import timedelta
 from classes.Hotspots import Hotspots
 from datetime import datetime
-from math import radians, cos, sin, asin, sqrt, log10, ceil, degrees, atan2
+from datetime import timedelta
+from decimal import Decimal, getcontext
+from tax_lots import aggregate_mining_lots_by_day, get_tax_lots_from_buy_trades, get_schedule_d
+from tax_tool_writers import write_hnt_rewards, write_tax_lots, write_schedule_d
+from parsers.hnt_prices import get_hnt_open_prices
+from parsers.binance import parse_binance_trades, is_binance_file
+from parsers.heliumex_db import parse_heliumex_db_trades, is_heliumex_db_file
+from parsers.parser_utils import utc_to_local
 
-g_hnt_adjust = 100000000 #divisor for hnt value rep
+g_hnt_adjust = Decimal(100000000) #divisor for hnt value rep
 g_include_transaction_fees = False #experimental, toggle on to try to include txn fees/assert location fees
 
 def load_hnt_rewards(hotspot, use_realtime_oracle_price=True, num_rewards=10000):
    for hotspot in hotspots:
       rewards = load_api_hotspot_rewards(hotspot,use_realtime_oracle_price,num_rewards)
-      print("Got: {len(rewards)} rewards")
-      f = open(f"data/{hotspot['name']}.csv", "w")
-
-      unique_blocks = {} #hack to remove dupe rewards
-      for reward in reversed(rewards):
-         as_of_time = reward['timestamp']
-         amount = reward['amount']
-         block = reward['block']
-         if block in unique_blocks:
-             continue
-         unique_blocks[block] = True
-         oracle_price = 0
-         #oracle_price = load_oracle_price_at_block(block)['price']
-         print(f"{as_of_time},{amount},{oracle_price},{block}")
-         f.write(f"{as_of_time},{amount},{oracle_price},{block}\n")
-      f.close()
+      write_hnt_rewards(hotspot, rewards)
 
 def load_api_hotspot_rewards(hotspot, use_realtime_oracle_price=True, num_rewards=10000):
    address = hotspot['address']
@@ -124,15 +113,21 @@ def load_tax_lots(hotspots, year):
       if hotspot_account in transactions_by_account.keys():
          account_transactions = transactions_by_account[hotspot_account]
          del transactions_by_account[hotspot_account] #don't double count if same owner owns multiple
-      hotspot_day_lots = consolidate_day_lots(filename)
-      hotspot_tax_lots = output_tax_lots_by_day(hotspot, hotspot_day_lots, account_transactions, prices_by_date, year)
+      hotspot_day_lots = aggregate_mining_lots_by_day(filename)
+      hotspot_tax_lots = write_tax_lots_by_day(hotspot, hotspot_day_lots, account_transactions, prices_by_date, year)
       tax_lots.extend(hotspot_tax_lots)
+   total_hnt = Decimal(0)
+   total_usd = Decimal(0)
+   for tax_lot in tax_lots:
+       total_hnt += tax_lot['hnt_amount']
+       total_usd += tax_lot['usd_amount']
+   print(f'Total HNT (all hotspots): {total_hnt}, Total USD: {total_usd}')
    return tax_lots
 
-def output_tax_lots_by_day(hotspot, day_lots, account_transactions, prices_by_date, year):
+def write_tax_lots_by_day(hotspot, day_lots, account_transactions, prices_by_date, year):
     tax_lots = []
-    total_hnt = 0
-    total_usd = 0
+    total_hnt = Decimal(0)
+    total_usd = Decimal(0)
     hotspot_name = hotspot['name']
     filename = f"output/{hotspot_name}_tax_lots.csv"
 
@@ -150,9 +145,9 @@ def output_tax_lots_by_day(hotspot, day_lots, account_transactions, prices_by_da
         date = key
         if year > 0 and date.year != year:
             continue
-        hnt_fees = 0
+        hnt_fees = Decimal(0)
 
-        hnt_price = 0
+        hnt_price = Decimal(0)
         if date in prices_by_date:
            hnt_price = prices_by_date[date]
 
@@ -175,105 +170,22 @@ def output_tax_lots_by_day(hotspot, day_lots, account_transactions, prices_by_da
         tax_lot['hnt_price'] = hnt_price
         tax_lot['usd_amount'] = usd_amount
         tax_lots.append(tax_lot)
-        print(f"{tax_lot}")
-    output_tax_lots(tax_lots, filename)
+        #print(f"{tax_lot}")
+    write_tax_lots(tax_lots, filename)
 
     print(f'Total HNT: {total_hnt}, Total USD: {total_usd}')
     return tax_lots
 
-def output_tax_lots(tax_lots, filename):
-   f = open(f"{filename}", "w")
-   msg = f'date,hotspot,hnt_amount,hnt_price,usd_amount'
-   print(f'{msg}')
-   f.write(f'{msg}\n')
-   for tax_lot in tax_lots:
-      date = tax_lot['time']
-      hotspot_name = tax_lot['hotspot']
-      hnt_amount_adj = tax_lot['hnt_amount']
-      hnt_price = tax_lot['hnt_price']
-      usd_amount = tax_lot['usd_amount']
-      msg = f'{date},{hotspot_name},{hnt_amount_adj},{hnt_price},{usd_amount}'
-      print(f'{msg}')
-      f.write(f'{msg}\n')
-
-def get_hnt_open_prices(filename ='hnt-prices/hnt-prices.csv'):
-    print(f'reading prices from {filename}')
-    prices_by_date = {}
-    with open (filename) as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter=',')
-        line_count = 0;
-        for row in csv_reader:
-            line_count += 1
-            if (line_count == 1):
-                continue
-            time_stamp_str = row[0]
-            time_stamp = parse(time_stamp_str)
-            date_stamp = time_stamp.date()
-            price_str = row[1]
-            price = float(price_str)
-            prices_by_date[date_stamp] = price
-    return prices_by_date
-
-#takes all transactions and consolidates them into a single tax lot per day
-def consolidate_day_lots(filename):
-    print(f'reading from {filename}')
-    amounts_by_date = {}
-    total = 0
-
-    with open (filename) as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter=',')
-        line_count = 0
-        for row in csv_reader:
-            time_stamp_str = row[0]
-            time_stamp = parse(time_stamp_str)
-            time_stamp_adj = utc_to_local(time_stamp)
-            #print(time_stamp)
-            #print(time_stamp_adj)
-            date_stamp = time_stamp_adj.date() #handle timezone?
-            amount = int(row[1])
-            block = row[2]
-            #print(f'{time_stamp}, {date_stamp}: {amount}')
-
-            if date_stamp in amounts_by_date.keys():
-                amounts_by_date[date_stamp] += amount
-            else:
-                amounts_by_date[date_stamp] = amount
-            total += amount
-
-    #print(amounts_by_date)
-    #print(f'Total: {total}')
-    return amounts_by_date
-
-def parse_trades(filename):
-    #binance for now
-    print(f'reading trades from {filename}')
+def parse_trades(filenames):
+    filename_array = filenames.split(',')
     trades = []
-    with open (filename) as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter=',')
-        line_count = 0;
-        for row in csv_reader:
-            line_count += 1
-            if (line_count == 1):
-                continue
-            time_stamp_str = row[0]
-            market = row[1]
-            if not market.startswith('HNT'):
-                raise Exception('unexpected product in trades file: {market}', '{market} not supported')
-            buy_sell = row[2]
-            time_stamp = parse(time_stamp_str)
-            time_stamp_adj = utc_to_local(time_stamp)
-            hnt_price = float(row[3])
-            hnt_amount = float(row[4])
-            if buy_sell.startswith('B'):
-                print(f'buy detected {hnt_amount}')
-                hnt_amount = 0 - hnt_amount #treat as buy
-            trade = {}
-            trade['time'] = time_stamp_adj
-            trade['hnt_price'] = hnt_price
-            trade['hnt_amount'] = hnt_amount
-            trade['exchange'] = 'binance' #support others later
-            trades.append(trade)
-#    print(trades)
+    for filename in filename_array:
+        if is_binance_file(filename):
+            trades.extend(parse_binance_trades(filename))
+        elif is_heliumex_db_file(filename):
+            trades.extend(parse_heliumex_db_trades(filename))
+        else:
+            raise Exception(f'could not detect {filename} as a supported tranasaction file', f'{filename} not supported')
     return trades
 
 def process_trades(hotspots, filename, year):
@@ -282,110 +194,9 @@ def process_trades(hotspots, filename, year):
    result =  get_schedule_d(tax_lots, trades)
    schedule_d_items = result[0]
    remaining_tax_lots = result[1]
-   output_schedule_d(schedule_d_items)
+   write_schedule_d(schedule_d_items)
    filename = 'output/remaining_tax_lots.csv'
-   output_tax_lots(remaining_tax_lots, filename)
-
-def get_buy_trade_tax_lots(buy_trades):
-   sorted_buy_trades = sorted(buy_trades, key=lambda x: (x['time']))  #order by time (FIFO)
-   tax_lots = []
-   for trade in sorted_buy_trades: #create new tax lots for any buys
-        tax_lot = {}
-        time_stamp = trade['time']
-        print(f'{time_stamp}')
-        tax_lot['time'] = time_stamp
-        tax_lot['hotspot'] = 'hntbuy'
-        tax_lot['hnt_amount'] = 0 - trade['hnt_amount']
-        tax_lot['hnt_price'] = trade['hnt_price']
-        tax_lot['usd_amount'] = tax_lot['hnt_amount'] * tax_lot['hnt_price'] 
-        tax_lots.append(tax_lot)
-        print(f"{tax_lot}")
-   return tax_lots
-
-
-def get_schedule_d(tax_lots, trades):
-   schedule_d_items = []
-   total_gain_loss = 0 
-   remaining_tax_lots = []
-   sorted_trades = sorted(trades, key=lambda x: (x['time']))  #order by time (FIFO)
-   sorted_sell_trades = [x for x in sorted_trades if x['hnt_amount'] >= 0]
-   sorted_buy_trades = [x for x in sorted_trades if x['hnt_amount'] < 0]
-   buy_tax_lots = get_buy_trade_tax_lots(sorted_buy_trades)
-   tax_lots.extend(buy_tax_lots)
-
-   sorted_tax_lots = sorted(tax_lots, key=lambda x: (x['time'], x['hotspot']))
-
-   print(f'processing {len(sorted_sell_trades)} trades.')
-   for trade in sorted_sell_trades:
-      print(f'{trade}')
-      trade_time = trade['time']
-      trade_hnt_price = trade['hnt_price']
-      remaining_amount = trade['hnt_amount']
-      for tax_lot in sorted_tax_lots: #order by time (FIFO only now)
-         tax_lot_amount = tax_lot['hnt_amount']
-         if tax_lot_amount  == 0:
-            continue
-         tax_lot_hnt_price = tax_lot['hnt_price']
-         schedule_d_amount = 0
-         schedule_d_time = trade_time
-         schedule_d_gain_loss = 0
-         if tax_lot_amount > remaining_amount:
-            schedule_d_amount = remaining_amount
-            tax_lot_amount -= remaining_amount
-            remaining_amount = 0
-         else:
-            schedule_d_amount = tax_lot_amount
-            remaining_amount -= tax_lot_amount
-            tax_lot_amount = 0
-         if schedule_d_amount == 0:
-            continue
-         tax_lot['hnt_amount'] = tax_lot_amount
-         schedule_d_gain_loss = schedule_d_amount * (trade_hnt_price - tax_lot_hnt_price)
-         schedule_d_item = {}
-         schedule_d_item['open_time'] = tax_lot['time']
-         schedule_d_item['close_time'] = schedule_d_time
-         schedule_d_item['quantity'] = schedule_d_amount
-         schedule_d_item['open_price'] = tax_lot_hnt_price
-         schedule_d_item['close_price'] = trade_hnt_price
-         schedule_d_item['gain_loss'] = schedule_d_gain_loss
-         schedule_d_items.append(schedule_d_item)
-         total_gain_loss += schedule_d_gain_loss
-         print(schedule_d_item)
-   for tax_lot in sorted_tax_lots:
-      if tax_lot['hnt_amount'] != 0:
-         remaining_tax_lots.append(tax_lot)
-         print(tax_lot)
-   print(total_gain_loss)
-   #print(schedule_d_items)
-   return schedule_d_items, remaining_tax_lots
-
-def output_schedule_d(items):
-    f = open(f"output/schedule_d.csv", "w")
-    msg = f'open_time,close_time,quantity,open_price,close_price,gain_loss,gain,loss,longshort'
-    print(f'{msg}')
-    f.write(f'{msg}\n')
-    for item in items:
-       open_time = item['open_time']
-       close_time = item['close_time']
-       quantity = item['quantity']
-       open_price = item['open_price']
-       close_price = item['close_price']
-       gain_loss = item['gain_loss']
-       gain = 0
-       loss = 0
-       if gain_loss >= 0:
-           gain = gain_loss
-       else:
-           loss = gain_loss
-       longshort = 'short' #default short
-       diff_days = (close_time.date() - open_time.date()).days
-       if diff_days >= 365:
-           longshort = 'long'
-       if diff_days < 0:
-             raise Exception(f'tax lot processing resulted in scheduled d close {close_time} before open {open_time}, aborting', 'transaction order failure')
-       msg = f'{open_time},{close_time},{quantity},{open_price},{close_price},{gain_loss},{gain},{loss},{longshort}'
-       print(f'{msg}')
-       f.write(f'{msg}\n')
+   write_tax_lots(remaining_tax_lots, filename)
 
 def get_block_date_time(block):
     path = f"blocks/{block}"
@@ -412,7 +223,7 @@ def get_transactions(account, transactions):
          txn = transaction['txn']
          #print(txn)
          update_time = transaction['updated_at']
-         amount = 0
+         amount = Decimal(0)
          if 'amount' in transaction.keys():
             amount = transaction['amount']
          fee = 0
@@ -477,12 +288,12 @@ def get_modified_transactions(account, transactions):
       time_stamp = parse(update_time)
       time_stamp_adj = utc_to_local(time_stamp)
       date = time_stamp_adj.date()
-      amount = 0
+      amount = Decimal(0)
       fee = transaction['fee'] 
       mod_transaction = {}
       mod_transaction['update_time'] = date
       txn_type = transaction['txn_type']
-      fee_divisor = 100000 #convert to USD
+      fee_divisor = Decimal(100000) #convert to USD
       if txn_type == 'payment_v1':
          amount = (0 - fee) / fee_divisor
       elif txn_type == 'payment_v2':
@@ -493,20 +304,13 @@ def get_modified_transactions(account, transactions):
       if amount != 0:
          modified_transactions.append(mod_transaction)
    print(modified_transactions)
-   return modified_transactions    
-
-def utc_to_local(utc_dt):
-    # get integer timestamp to avoid precision lost
-    timestamp = calendar.timegm(utc_dt.timetuple())
-    local_dt = datetime.fromtimestamp(timestamp)
-    assert utc_dt.resolution >= timedelta(microseconds=1)
-    return local_dt.replace(microsecond=utc_dt.microsecond)
+   return modified_transactions
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("tax tools")
     parser.add_argument('-x', choices=['refresh_hotspots','hnt_rewards', 'tax_lots', 'parse_trades', 'schedule_d'], help="action to take", required=True)
     parser.add_argument('-n', '--name', help='hotspot name to analyze with dashes-between-words')
-    parser.add_argument('-f', '--file', help='data file for tax processing')
+    parser.add_argument('-f', '--file', help='data file(s) for tax processing')
     parser.add_argument('-y', '--year', help='filter to a given tax year')
     args = parser.parse_args()
     H = Hotspots()

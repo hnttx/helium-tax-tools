@@ -23,7 +23,9 @@ python3 tax_tools.py -x hnt_rewards -n animal-name-spaces
 this will refresh the cached rewards data that is used in tax_lots
 
 
-python3 tax_tools.py -x schedule_d -n animal-name-spaces -f binances-trades.csv -y 2020
+python3 tax_tools.py -x schedule_d -n animal-name-spaces -f binances-trades.csv,heliumex_trades.csv -y 2020
+
+f supports one or more trade files (only binance and heliumex db export formats currently)
 y is the tax year
 
 This will read a binance exported csv file and combine the trades from there with your tax lots to produce a basic schedule D output in output subdirectory.
@@ -34,6 +36,9 @@ This will read a binance exported csv file and combine the trades from there wit
 Date(UTC),Market,Type,Price,Amount,Total,Fee,Fee Coin
 * It currently does't care about the fees at all.
 
+# Expected HeliumEx DB Export CSV format
+user_id,email,timestamp,transaction_type,symbol,account_id,transaction_amount,exchange_transaction_id,comment,order_id,sequence_number,post_balance
+* iI does handle fees
 
 
 # Known issues
