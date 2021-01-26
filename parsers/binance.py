@@ -22,6 +22,17 @@ def parse_binance_trades(filename):
             time_stamp_adj = utc_to_local(time_stamp)
             hnt_price = Decimal(row[3])
             hnt_amount = Decimal(row[4])
+            cash_total = Decimal(row[5])
+            fee = Decimal(row[6])
+            fee_coin = row[7]
+            if fee_coin.upper().startswith('USD'):
+                cash_total -= fee
+                orig_hnt_price = hnt_price
+                hnt_price = cash_total / hnt_amount
+                print(f'before price:{orig_hnt_price} adj: {hnt_price}')
+            elif fee_coin.upper().startswith('HNT'):
+                hnt_amount -= fee
+
             if buy_sell.startswith('B'):
                 print(f'buy detected {hnt_amount}')
                 hnt_amount = 0 - hnt_amount #treat as buy
